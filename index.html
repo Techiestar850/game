@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Pong</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#071025;
+      --accent:#00f0ff;
+      --muted:#94a3b8;
+      --white:#e6eef6;
+    }
+
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
+      background: linear-gradient(180deg, #02040a 0%, #071126 100%);
+      color:var(--white);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .wrap{
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      align-items:center;
+    }
+
+    .hud{
+      display:flex;
+      gap:24px;
+      align-items:center;
+      justify-content:center;
+      width:820px;
+      color:var(--muted);
+      user-select:none;
+    }
+
+    .score{
+      background:rgba(255,255,255,0.03);
+      padding:8px 14px;
+      border-radius:8px;
+      display:flex;
+      gap:24px;
+      align-items:center;
+      font-weight:600;
+      letter-spacing:1px;
+    }
+
+    .score .player{
+      color:var(--accent);
+      font-size:20px;
+    }
+
+    .controls{
+      margin-left:auto;
+      color:var(--muted);
+      font-size:13px;
+    }
+
+    canvas{
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border:1px solid rgba(255,255,255,0.04);
+      box-shadow: 0 6px 30px rgba(0,0,0,0.6);
+      border-radius:10px;
+    }
+
+    .footer{
+      margin-top:8px;
+      font-size:13px;
+      color:var(--muted);
+      width:820px;
+      text-align:center;
+    }
+
+    .center-text{
+      position: absolute;
+      transform:translate(-50%,-50%);
+      left:50%;
+      top:50%;
+      color:var(--muted);
+      pointer-events:none;
+      font-weight:600;
+      letter-spacing:1px;
+    }
+
+    @media (max-width:900px){
+      .hud,.footer{width:92vw;}
+      canvas{width:92vw;height:57vw;}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <div class="score" id="scoreboard">
+        <div class="player">Player: <span id="leftScore">0</span></div>
+        <div class="muted">—</div>
+        <div class="computer">Computer: <span id="rightScore">0</span></div>
+      </div>
+      <div class="controls">
+        Controls: Move mouse over the game or use Arrow Up / Arrow Down
+      </div>
+    </div>
+
+    <div style="position:relative;">
+      <canvas id="game" width="800" height="500"></canvas>
+      <div id="centerMessage" class="center-text" style="display:none"></div>
+    </div>
+
+    <div class="footer">
+      Simple Pong — ball speed increases slowly. First to 10 wins. Press Space to pause / resume. Press R to reset scores.
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+
+      const scoreboardLeft = document.getElementById('leftScore');
+      const scoreboardRight = document.getElementById('rightScore');
+      const centerMessage = document.getElementById('centerMessage');
+
+      const W = canvas.width;
+      const H = canvas.height;
+
+      // Game state
+      const paddle = {
+        w: 12,
+        h: 110,
+        left: { x: 20, y: (H - 110) / 2, dy: 0 },
+        right: { x: W - 20 - 12, y: (H - 110) / 2, dy: 0 }
+      };
+
+      const ball = {
+        x: W / 2,
+        y: H / 2,
+        r: 8,
+        vx: 0,
+        vy: 0,
+        speed: 5
+      };
+
+      let leftScore = 0;
+      let rightScore = 0;
+      const winScore = 10;
+
+      let paused = false;
+      let lastTime = 0;
+      let showMessageTimer = 0;
+
+      // Controls
+      const keys = { ArrowUp: false, ArrowDown: false };
+      let mouseY = null;
+
+      // Initialize
+      resetBall(true);
+
+      // Utility
+      function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+      function randRange(a, b) { return a + Math.random() * (b - a); }
+
+      // Reset ball to center. if toLeft true, send initially toward left player, otherwise to right.
+      function resetBall(toLeft) {
+        ball.x = W / 2;
+        ball.y = H / 2;
+        ball.speed = 5;
+
+        // Random angle between -25 and 25 degrees converted to radians
+        const ang = (randRange(-25, 25) * Math.PI) / 180;
+        const dir = (typeof toLeft === 'boolean') ? (toLeft ? -1 : 1) : (Math.random() < 0.5 ? -1 : 1);
+
+        ball.vx = dir * ball.speed * Math.cos(ang);
+        ball.vy = ball.speed * Math.sin(ang);
+      }
+
+      function startRound(message) {
+        centerMessage.style.display = 'block';
+        centerMessage.textContent = message;
+        showMessageTimer = 60; // frames (~1s)
+        paused = true;
+      }
+
+      function resumeAfterMessage() {
+        centerMessage.style.display = 'none';
+        paused = false;
+      }
+
+      function updateScore() {
+        scoreboardLeft.textContent = leftScore;
+        scoreboardRight.textContent = rightScore;
+      }
+
+      // Game loop
+      function update(dt) {
+        if (paused) return;
+
+        // Player paddle movement via keys
+        const keySpeed = 7;
+        if (keys.ArrowUp) paddle.left.y -= keySpeed;
+        if (keys.ArrowDown) paddle.left.y += keySpeed;
+
+        // Mouse control overrides keys (if mouseY not null)
+        if (mouseY !== null) {
+          // Translate mouse page coordinate to canvas coordinate
+          const rect = canvas.getBoundingClientRect();
+          const y = mouseY - rect.top;
+          paddle.left.y = y - paddle.h / 2;
+        }
+
+        // Clamp paddles inside screen
+        paddle.left.y = clamp(paddle.left.y, 0, H - paddle.h);
+
+        // Simple AI for right paddle: follow ball with max speed and small delay
+        const aiSpeed = 4 + Math.min(3, ball.speed / 4); // get a bit faster as ball speeds up
+        const targetY = ball.y - paddle.h / 2;
+        if (paddle.right.y + paddle.h / 2 < ball.y - 6) {
+          paddle.right.y += aiSpeed;
+        } else if (paddle.right.y + paddle.h / 2 > ball.y + 6) {
+          paddle.right.y -= aiSpeed;
+        }
+        paddle.right.y = clamp(paddle.right.y, 0, H - paddle.h);
+
+        // Move ball
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+
+        // Top/Bottom collision
+        if (ball.y - ball.r <= 0) {
+          ball.y = ball.r;
+          ball.vy = -ball.vy;
+        } else if (ball.y + ball.r >= H) {
+          ball.y = H - ball.r;
+          ball.vy = -ball.vy;
+        }
+
+        // Paddle collisions (left)
+        if (ball.x - ball.r <= paddle.left.x + paddle.w) {
+          if (ball.y >= paddle.left.y && ball.y <= paddle.left.y + paddle.h) {
+            // collision!
+            ball.x = paddle.left.x + paddle.w + ball.r + 0.5;
+            reflectFromPaddle(paddle.left);
+          } else if (ball.x - ball.r < 0) {
+            // missed -> score for right
+            rightScore++;
+            updateScore();
+            checkWin();
+            resetBall(false);
+            startRound('Point for Computer');
+          }
+        }
+
+        // Paddle collisions (right)
+        if (ball.x + ball.r >= paddle.right.x) {
+          if (ball.y >= paddle.right.y && ball.y <= paddle.right.y + paddle.h) {
+            // collision!
+            ball.x = paddle.right.x - ball.r - 0.5;
+            reflectFromPaddle(paddle.right);
+          } else if (ball.x + ball.r > W) {
+            // missed -> score for left
+            leftScore++;
+            updateScore();
+            checkWin();
+            resetBall(true);
+            startRound('Point for Player');
+          }
+        }
+      }
+
+      function reflectFromPaddle(p) {
+        // compute intersection: where on the paddle the ball hit, -1 (top) .. 1 (bottom)
+        const relativeY = (ball.y - (p.y + p.h / 2)) / (p.h / 2);
+        // clamp
+        const clamped = clamp(relativeY, -1, 1);
+
+        // max bounce angle ~65 degrees
+        const maxAngle = (65 * Math.PI) / 180;
+        const angle = clamped * maxAngle;
+
+        // reflect horizontally
+        const dir = (p === paddle.left) ? 1 : -1;
+
+        // increase speed slightly each hit
+        ball.speed = Math.min(12, ball.speed + 0.3);
+
+        ball.vx = dir * ball.speed * Math.cos(angle);
+        ball.vy = ball.speed * Math.sin(angle);
+
+        // add tiny random vertical jitter so it's not forever periodic
+        ball.vy += randRange(-0.3, 0.3);
+      }
+
+      function checkWin() {
+        if (leftScore >= winScore || rightScore >= winScore) {
+          const winner = leftScore > rightScore ? 'Player Wins!' : 'Computer Wins!';
+          paused = true;
+          centerMessage.style.display = 'block';
+          centerMessage.textContent = winner + ' — Press R to restart';
+        }
+      }
+
+      function draw() {
+        // Clear
+        ctx.clearRect(0, 0, W, H);
+
+        // middle dashed line
+        ctx.fillStyle = 'rgba(255,255,255,0.03)';
+        const dashH = 16;
+        const gap = 12;
+        const midX = W / 2 - 1;
+        for (let y = 10; y < H - 10; y += dashH + gap) {
+          ctx.fillRect(midX, y, 2, dashH);
+        }
+
+        // paddles
+        ctx.fillStyle = '#00f0ff';
+        // left
+        roundRect(ctx, paddle.left.x, paddle.left.y, paddle.w, paddle.h, 6);
+        // right (darker)
+        ctx.fillStyle = '#88f0ff';
+        roundRect(ctx, paddle.right.x, paddle.right.y, paddle.w, paddle.h, 6);
+
+        // ball
+        ctx.beginPath();
+        ctx.fillStyle = '#fff';
+        ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // subtle glow
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(0,240,255,0.06)';
+        ctx.arc(ball.x, ball.y, ball.r * 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw rounded rectangle helper
+      function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      function loop(ts) {
+        if (!lastTime) lastTime = ts;
+        const dt = ts - lastTime;
+        lastTime = ts;
+
+        // If there's a center message timer, count down and then resume
+        if (showMessageTimer > 0) {
+          showMessageTimer--;
+          if (showMessageTimer === 0) resumeAfterMessage();
+        }
+
+        update(dt);
+        draw();
+        requestAnimationFrame(loop);
+      }
+
+      // Input handling
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          keys[e.key] = true;
+          e.preventDefault();
+        }
+        if (e.key === ' ' || e.code === 'Space') {
+          paused = !paused;
+          if (!paused) centerMessage.style.display = 'none';
+          else { centerMessage.style.display = 'block'; centerMessage.textContent = 'Paused'; }
+          e.preventDefault();
+        }
+        if (e.key === 'r' || e.key === 'R') {
+          leftScore = 0; rightScore = 0; updateScore();
+          resetBall(Math.random() < 0.5);
+          paused = false;
+          centerMessage.style.display = 'none';
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          keys[e.key] = false;
+          e.preventDefault();
+        }
+      });
+
+      // Mouse control: track Y over canvas
+      canvas.addEventListener('mousemove', (e) => {
+        mouseY = e.clientY;
+      });
+
+      // If mouse leaves canvas, keep last position but you might want to disable: here we keep it
+      canvas.addEventListener('mouseleave', () => {
+        // optional: stop mouse control when leaving:
+        // mouseY = null;
+      });
+
+      // Touch support: allow dragging on touchscreen
+      canvas.addEventListener('touchmove', (e) => {
+        const t = e.touches[0];
+        if (!t) return;
+        mouseY = t.clientY;
+        e.preventDefault();
+      }, { passive: false });
+
+      // Start loop
+      requestAnimationFrame(loop);
+
+      // Prevent arrow keys from scrolling page
+      window.addEventListener('keydown', function (e) {
+        if (["ArrowUp", "ArrowDown", " "].indexOf(e.key) > -1) {
+          e.preventDefault();
+        }
+      }, false);
+    })();
+  </script>
+</body>
+</html>
