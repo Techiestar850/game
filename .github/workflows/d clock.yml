@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'dclock.html'
+      - 'd clock.html'
       - '.github/workflows/deploy.yml'
 
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
       - name: Prepare clock website
         run: |
           mkdir public
-          cp dclock.html public/index.html
+          cp d clock.html public/index.html
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
