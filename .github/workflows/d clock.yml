@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'dclock.html'
+      - '.github/workflows/deploy.yml'
+
   workflow_dispatch:
 
 permissions:
@@ -12,22 +16,22 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
+  group: pages
   cancel-in-progress: true
 
 jobs:
   deploy:
+    runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
-    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare website
+      - name: Prepare clock website
         run: |
           mkdir public
           cp dclock.html public/index.html
@@ -35,11 +39,11 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload website
+      - name: Upload website artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
 
-      - name: Deploy website
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
